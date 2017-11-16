@@ -143,7 +143,7 @@ func (ti *TerragruntInterpolation) interpolateImportParentTree() ast.Function {
 		Variadic:   false,
 		Callback: func(args []interface{}) (interface{}, error) {
 			msg := fmt.Errorf(
-				`DEPRECATED. Use ${prepend_list("-var-file=", "${find_all_in_parent_folders("*.tfvars")}")}`,
+				`DEPRECATED. Use ${find_all_in_parent_folders("*.tfvars")} in place of "${find_in_parent_folders()}"`,
 			)
 			return []string{}, msg
 		},
