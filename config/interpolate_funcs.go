@@ -2,31 +2,32 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/gruntwork-io/terragrunt/errors"
 	"github.com/gruntwork-io/terragrunt/util"
 	"github.com/hashicorp/hil/ast"
-	"os"
-	"path/filepath"
-	"strings"
 )
 
 func (ti *TerragruntInterpolation) Funcs() map[string]ast.Function {
 	return map[string]ast.Function{
-		"find_in_parent_folders":                ti.interpolateFindInParentFolders(),
-		"path_relative_to_include":              ti.interpolatePathRelativeToInclude(),
-		"path_relative_from_include":            ti.interpolatePathRelativeFromInclude(),
-		"get_env":                               ti.interpolateGetEnv(),
-		"get_tfvars_dir":                        ti.interpolateGetTfVarsDir(),
-		"get_parent_tfvars_dir":                 ti.interpolateGetParentTfVarsDir(),
-		"get_aws_account_id":                    ti.interpolateGetAWSAccountID(),
-		"prepend_list":                          ti.interpolatePrependList(),
-		"import_parent_tree":                    ti.interpolateImportParentTree(),
-		"find_all_in_parent_folders":            ti.interpolateFindAllInParentFolders(),
-		"get_terraform_commands_that_need_vars": ti.interpolateGetTerraformCommandsThatNeedVars(),
+		"find_in_parent_folders":                   ti.interpolateFindInParentFolders(),
+		"path_relative_to_include":                 ti.interpolatePathRelativeToInclude(),
+		"path_relative_from_include":               ti.interpolatePathRelativeFromInclude(),
+		"get_env":                                  ti.interpolateGetEnv(),
+		"get_tfvars_dir":                           ti.interpolateGetTfVarsDir(),
+		"get_parent_tfvars_dir":                    ti.interpolateGetParentTfVarsDir(),
+		"get_aws_account_id":                       ti.interpolateGetAWSAccountID(),
+		"prepend_list":                             ti.interpolatePrependList(),
+		"import_parent_tree":                       ti.interpolateImportParentTree(),
+		"find_all_in_parent_folders":               ti.interpolateFindAllInParentFolders(),
+		"get_terraform_commands_that_need_vars":    ti.interpolateGetTerraformCommandsThatNeedVars(),
 		"get_terraform_commands_that_need_locking": ti.interpolateGetTerraformCommandsThatNeedLocking(),
-		"get_terraform_commands_that_need_input": ti.interpolateGetTerraformCommandsThatNeedInput(),
+		"get_terraform_commands_that_need_input":   ti.interpolateGetTerraformCommandsThatNeedInput(),
 	}
 }
 

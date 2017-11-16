@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 
+	"os"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/gruntwork-io/terragrunt/aws_helper"
 	"github.com/gruntwork-io/terragrunt/config"
@@ -17,7 +19,6 @@ import (
 	"github.com/gruntwork-io/terragrunt/util"
 	version "github.com/hashicorp/go-version"
 	"github.com/urfave/cli"
-	"os"
 )
 
 const OPT_TERRAGRUNT_CONFIG = "terragrunt-config"
@@ -135,7 +136,11 @@ func CreateTerragruntCli(version string, writer io.Writer, errwriter io.Writer) 
 	cli.AppHelpTemplate = CUSTOM_USAGE_TEXT
 
 	app := cli.NewApp()
-
+	app.After = func(c *cli.Context) error {
+		fmt.Fprintf(c.App.Writer, "Cleaning up secrets\n")
+		os.Remove("/tmp/terragruntsecrets.tfvars")
+		return nil
+	}
 	app.Name = "terragrunt"
 	app.Author = "Gruntwork <www.gruntwork.io>"
 	app.Version = version

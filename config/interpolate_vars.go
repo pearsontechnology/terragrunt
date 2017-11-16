@@ -2,14 +2,16 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"reflect"
 
+	"github.com/gruntwork-io/terragrunt/kmsgrunt"
 	"github.com/gruntwork-io/terragrunt/util"
 
-//	"github.com/hashicorp/hil"
-	hilast "github.com/hashicorp/hil/ast"
+	//	"github.com/hashicorp/hil"
 	"github.com/hashicorp/hcl"
 	"github.com/hashicorp/hcl/hcl/ast"
+	hilast "github.com/hashicorp/hil/ast"
 	"github.com/mitchellh/reflectwalk"
 )
 
@@ -51,14 +53,14 @@ func (ti *TerragruntInterpolation) resolveTerragruntVarFiles(configStr string) (
 
 // interpolateVarFiles returns terragrunt_var_files after all functions inside of the block
 // were applied
-func (ti *TerragruntInterpolation)interpolateVarFiles(item *ast.ObjectItem) ([]string, error){
+func (ti *TerragruntInterpolation) interpolateVarFiles(item *ast.ObjectItem) ([]string, error) {
 	type terragruntVarFileConfig struct {
 		TerragruntVarFiles []string `hcl:terragrunt_var_files,omitempty`
 	}
 	var config terragruntVarFileConfig
 	var varFiles []string
 	if err := hcl.DecodeObject(&varFiles, item.Val); err != nil {
-	   return []string{}, fmt.Errorf("Error reading terraform_var_files: %s", err)
+		return []string{}, fmt.Errorf("Error reading terraform_var_files: %s", err)
 	}
 	config.TerragruntVarFiles = varFiles
 	// we have uninterpolated config here. Now we walk it
@@ -80,11 +82,34 @@ func loadVarsFromFiles(files []string) (map[string]hilast.Variable, error) {
 		if err = hcl.Decode(&out, configString); err != nil {
 			return nil, err
 		}
+		f, err := os.OpenFile("/tmp/terragruntsecrets.tfvars", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+		if err != nil {
+			panic(err)
+		}
+		defer f.Close()
+
+		svc, err := kmsgrunt.CreateKmsClient()
+		if err != nil {
+			err = fmt.Errorf("Got error connecting to KMS: %s", err)
+		}
 		for k, v := range out {
-			o, err := NewVariable(v)
-			if err == nil {
-				varkey := fmt.Sprintf("var.%s", k)
-				retval[varkey] = o
+			myval := reflect.ValueOf(v)
+			if len(myval.String()) > 2 && myval.String()[0:3] == "ENC" {
+				decryptedval := kmsgrunt.Decrypt(svc, myval.String())
+				o, err := NewVariable(decryptedval)
+				if err == nil {
+					varkey := fmt.Sprintf("var.%s", k)
+					retval[varkey] = o
+					if _, err = f.WriteString(string(k) + " = \"" + decryptedval + "\"\n"); err != nil {
+						panic(err)
+					}
+				}
+			} else {
+				o, err := NewVariable(v)
+				if err == nil {
+					varkey := fmt.Sprintf("var.%s", k)
+					retval[varkey] = o
+				}
 			}
 		}
 	}
@@ -108,7 +133,6 @@ func NewVariable(v interface{}) (result hilast.Variable, err error) {
 	default:
 		err = fmt.Errorf("Uknown type: %s", val.Kind())
 	}
-
 	result.Value = v
 	return
 }
