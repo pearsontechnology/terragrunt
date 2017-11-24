@@ -3,7 +3,6 @@ package kmsgrunt
 import (
 	"encoding/base64"
 	"fmt"
-	"os"
 
 	"github.com/aws/aws-sdk-go/service/kms"
 )
@@ -16,8 +15,8 @@ func Decrypt(svc *kms.KMS, encryptedVal string) string {
 	result, err := svc.Decrypt(&kms.DecryptInput{CiphertextBlob: blob})
 
 	if err != nil {
-		fmt.Println("Got error decrypting data: ", err)
-		os.Exit(1)
+		fmt.Println("Error decrypting data: ", err)
+		return encryptedVal
 	}
 
 	blobString := string(result.Plaintext)

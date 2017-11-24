@@ -31,8 +31,7 @@ func CreateKmsClient() (*kms.KMS, error) {
 	viper.AddConfigPath(".")              // optionally look for config in the working directory
 	err := viper.ReadInConfig()           // Find and read the config file
 	if err != nil {                       // Handle errors reading the config file
-
-		fmt.Println(errors.WithStackTraceAndPrefix(err, "fatal error. Expecting config file: .kmsgrunt.toml"))
+		fmt.Println(errors.WithStackTraceAndPrefix(err, "Expecting config file: .kmsgrunt.toml. Not found."))
 		fmt.Println(errors.WithStackTraceAndPrefix(err, "Using defaults eu-west-1 and default profile"))
 	}
 	sess, err := session.NewSessionWithOptions(session.Options{
