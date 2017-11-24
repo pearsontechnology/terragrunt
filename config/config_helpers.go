@@ -24,6 +24,7 @@ var HELPER_VAR_SYNTAX_REGEX = regexp.MustCompile(`^\$\{\s*var\.(.*?)\s*\}$`)
 var HELPER_FUNCTION_SYNTAX_REGEX = regexp.MustCompile(`^\$\{\s*(.*?)\((.*?)\)\s*\}$`)
 var HELPER_FUNCTION_PARAM_REGEX = regexp.MustCompile(`\s*"(.*?)"\s*`)
 var HELPER_FUNCTION_GET_ENV_PARAMETERS_SYNTAX_REGEX = regexp.MustCompile(`^\s*"(?P<env>[^=]+?)"\s*\,\s*"(?P<default>.*?)"\s*$`)
+var MAX_PARENT_FOLDERS_TO_CHECK = 5
 
 // List of terraform commands that accept -lock-timeout
 var TERRAFORM_COMMANDS_NEED_LOCKING = []string{
