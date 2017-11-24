@@ -24,10 +24,11 @@ func Decrypt(svc *kms.KMS, encryptedVal string, encryptedValkey string) string {
 	}
 	viper.SetConfigType("toml")
 	viper.SetConfigName(".kmsgrunt")
-	viper.AddConfigPath("/etc/kmsgrunt/") // path to look for the config file in
-	viper.AddConfigPath("$HOME/")         // call multiple times to add many search paths
-	viper.AddConfigPath(".")              // optionally look for config in the working directory
-	viperr := viper.ReadInConfig()        // Find and read the config file
+	viper.AddConfigPath("$HOME/") // call multiple times to add many search paths
+	viper.AddConfigPath(".")      // optionally look for config in the working directory
+	viper.AddConfigPath("..")
+	viper.AddConfigPath("../../")
+	viperr := viper.ReadInConfig() // Find and read the config file
 	if viperr != nil {
 		fmt.Println("kmsgrunt config read failed - undecrypted variables will be used")
 		return ""

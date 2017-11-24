@@ -26,11 +26,12 @@ func CreateKmsClient() (*kms.KMS, error) {
 		}
 	}
 	viper.SetConfigName(".kmsgrunt")
-	viper.AddConfigPath("/etc/kmsgrunt/") // path to look for the config file in
-	viper.AddConfigPath("$HOME/")         // call multiple times to add many search paths
-	viper.AddConfigPath(".")              // optionally look for config in the working directory
-	err := viper.ReadInConfig()           // Find and read the config file
-	if err != nil {                       // Handle errors reading the config file
+	viper.AddConfigPath("$HOME/") // call multiple times to add many search paths
+	viper.AddConfigPath(".")      // optionally look for config in the working directory
+	viper.AddConfigPath("..")
+	viper.AddConfigPath("../../")
+	err := viper.ReadInConfig() // Find and read the config file
+	if err != nil {             // Handle errors reading the config file
 		fmt.Println(errors.WithStackTraceAndPrefix(err, "Expecting config file: .kmsgrunt.toml. Not found."))
 		fmt.Println(errors.WithStackTraceAndPrefix(err, "Using defaults eu-west-1 and default profile"))
 	}
