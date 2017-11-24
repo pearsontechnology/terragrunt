@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/spf13/viper"
+
 	"os"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -138,7 +140,19 @@ func CreateTerragruntCli(version string, writer io.Writer, errwriter io.Writer) 
 	app := cli.NewApp()
 	app.After = func(c *cli.Context) error {
 		fmt.Fprintf(c.App.Writer, "Cleaning up secrets\n")
-		os.Remove("/tmp/terragruntsecrets.tfvars")
+		viper.SetConfigType("toml")
+		viper.SetConfigName(".kmsgrunt")
+		viper.AddConfigPath("$HOME/") // call multiple times to add many search paths
+		viper.AddConfigPath(".")      // optionally look for config in the working directory
+		viper.AddConfigPath("..")
+		viper.AddConfigPath("../../")
+		err := viper.ReadInConfig() // Find and read the config file
+		if err != nil {
+			fmt.Println("kmsgrunt config read failed", err)
+		}
+		tmpSecretsPath := viper.GetString("tmpSecretsPath")
+		fmt.Println("Clearing secrets location: ", tmpSecretsPath)
+		os.Remove(tmpSecretsPath)
 		return nil
 	}
 	app.Name = "terragrunt"

@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"reflect"
 
 	"github.com/gruntwork-io/terragrunt/kmsgrunt"
@@ -82,11 +81,6 @@ func loadVarsFromFiles(files []string) (map[string]hilast.Variable, error) {
 		if err = hcl.Decode(&out, configString); err != nil {
 			return nil, err
 		}
-		f, err := os.OpenFile("/tmp/terragruntsecrets.tfvars", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-		if err != nil {
-			panic(err)
-		}
-		defer f.Close()
 
 		svc, err := kmsgrunt.CreateKmsClient()
 		if err != nil {
@@ -95,13 +89,12 @@ func loadVarsFromFiles(files []string) (map[string]hilast.Variable, error) {
 		for k, v := range out {
 			myval := reflect.ValueOf(v)
 			if len(myval.String()) > 2 && myval.String()[0:3] == "ENC" {
-				decryptedval := kmsgrunt.Decrypt(svc, myval.String())
-				o, err := NewVariable(decryptedval)
-				if err == nil {
-					varkey := fmt.Sprintf("var.%s", k)
-					retval[varkey] = o
-					if _, err = f.WriteString(string(k) + " = \"" + decryptedval + "\"\n"); err != nil {
-						panic(err)
+				result := kmsgrunt.Decrypt(svc, myval.String(), k)
+				if result == "" {
+					o, err := NewVariable(v)
+					if err == nil {
+						varkey := fmt.Sprintf("var.%s", k)
+						retval[varkey] = o
 					}
 				}
 			} else {
