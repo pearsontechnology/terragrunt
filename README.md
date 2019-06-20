@@ -1090,7 +1090,7 @@ terragrunt = {
 }
 ```
 
-If you run `terragrunt apply-all --terragrunt-source: /source/infrastructure-modules`, then the local path Terragrunt
+If you run `terragrunt apply-all --terragrunt-source /source/infrastructure-modules`, then the local path Terragrunt
 will compute for the module above will be `/source/infrastructure-modules//networking/vpc`.
 
 
@@ -1823,6 +1823,7 @@ start with the prefix `--terragrunt-`. The currently available options are:
   specified via the `TERRAGRUNT_IAM_ROLE` environment variable. This is a convenient way to use Terragrunt and 
   Terraform with multiple AWS accounts.
 
+* `--terragrunt-exclude-dir`: Unix-style glob of directories to exclude when running `*-all` commands. Modules under these directories will be excluded during execution of the commands. If a relative path is specified, it should be relative from `--terragrunt-working-dir`. Flag can be specified multiple times.
 
 ### Configuration
 
