@@ -3,9 +3,12 @@ package cli
 import (
 	"bytes"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"strings"
 
 	"github.com/gruntwork-io/terragrunt/config"
 	"github.com/gruntwork-io/terragrunt/errors"
@@ -13,7 +16,6 @@ import (
 	"github.com/gruntwork-io/terragrunt/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"strings"
 )
 
 func TestParseTerragruntOptionsFromArgs(t *testing.T) {
@@ -82,6 +84,12 @@ func TestParseTerragruntOptionsFromArgs(t *testing.T) {
 		{
 			[]string{"--terragrunt-ignore-dependency-errors"},
 			mockOptions(t, util.JoinPath(workingDir, config.DefaultTerragruntConfigPath), workingDir, []string{}, false, "", true),
+			nil,
+		},
+
+		{
+			[]string{"--terragrunt-ignore-external-dependencies"},
+			mockOptions(t, util.JoinPath(workingDir, config.DefaultTerragruntConfigPath), workingDir, []string{}, false, "", false),
 			nil,
 		},
 
@@ -192,6 +200,34 @@ func TestFilterTerragruntArgs(t *testing.T) {
 	}
 }
 
+func TestParseMultiStringArg(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		args         []string
+		argName      string
+		defaultValue []string
+		expectedVals []string
+		expectedErr  error
+	}{
+		{[]string{"apply-all", "--foo", "bar"}, "foo", []string{"default_bar"}, []string{"bar"}, nil},
+		{[]string{"apply-all", "--test", "bar"}, "foo", []string{"default_bar"}, []string{"default_bar"}, nil},
+		{[]string{"plan-all", "--test", "--foo", "bar1", "--foo", "bar2"}, "foo", []string{"default_bar"}, []string{"bar1", "bar2"}, nil},
+		{[]string{"plan-all", "--test", "value", "--foo", "bar1", "--foo"}, "foo", []string{"default_bar"}, nil, ArgMissingValue("foo")},
+	}
+
+	for _, testCase := range testCases {
+		actual, actualErr := parseMultiStringArg(testCase.args, testCase.argName, testCase.defaultValue)
+
+		if testCase.expectedErr != nil {
+			assert.True(t, errors.IsError(actualErr, testCase.expectedErr), "Expected error %v but got error %v", testCase.expectedErr, actualErr)
+		} else {
+			assert.Nil(t, actualErr, "Unexpected error: %v", actualErr)
+			assert.Equal(t, testCase.expectedVals, actual, "For args %v", testCase.args)
+		}
+	}
+}
+
 func TestParseEnvironmentVariables(t *testing.T) {
 	testCases := []struct {
 		environmentVariables []string
@@ -278,7 +314,7 @@ func TestTerraformHelp(t *testing.T) {
 
 		require.NoError(t, err)
 		if !strings.Contains(output.String(), testCase.expected) {
-			t.Errorf("expected output to include help text; got: %q", err)
+			t.Errorf("expected output to include help text; got stdout: %v.", output.String())
 		}
 	}
 }
@@ -291,4 +327,120 @@ func TestTerraformHelp_wrongHelpFlag(t *testing.T) {
 
 	err := app.Run([]string{"terragrunt", "plan", "help"})
 	require.Error(t, err)
+}
+
+func TestFilterTerraformExtraArgs(t *testing.T) {
+	workingDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	workingDir = filepath.ToSlash(workingDir)
+
+	temporaryFile := createTempFile(t)
+
+	testCases := []struct {
+		options      *options.TerragruntOptions
+		extraArgs    config.TerraformExtraArguments
+		expectedArgs []string
+	}{
+		// Standard scenario
+		{
+			mockCmdOptions(t, workingDir, []string{"apply"}),
+			mockExtraArgs([]string{"--foo", "bar"}, []string{"apply", "plan", "destroy"}, []string{}, []string{}),
+			[]string{"--foo", "bar"},
+		},
+		// optional existing var file
+		{
+			mockCmdOptions(t, workingDir, []string{"apply"}),
+			mockExtraArgs([]string{"--foo", "bar"}, []string{"apply", "plan"}, []string{}, []string{temporaryFile}),
+			[]string{"--foo", "bar", fmt.Sprintf("-var-file=%s", temporaryFile)},
+		},
+		// required var file + optional existing var file
+		{
+			mockCmdOptions(t, workingDir, []string{"apply"}),
+			mockExtraArgs([]string{"--foo", "bar"}, []string{"apply", "plan"}, []string{"required.tfvars"}, []string{temporaryFile}),
+			[]string{"--foo", "bar", "-var-file=required.tfvars", fmt.Sprintf("-var-file=%s", temporaryFile)},
+		},
+		// non existing required var file + non existing optional var file
+		{
+			mockCmdOptions(t, workingDir, []string{"apply"}),
+			mockExtraArgs([]string{"--foo", "bar"}, []string{"apply", "plan"}, []string{"required.tfvars"}, []string{"optional.tfvars"}),
+			[]string{"--foo", "bar", "-var-file=required.tfvars"},
+		},
+		// plan providing a folder, var files should stay included
+		{
+			mockCmdOptions(t, workingDir, []string{"plan", workingDir}),
+			mockExtraArgs([]string{"--foo", "bar"}, []string{"plan", "apply"}, []string{"required.tfvars"}, []string{temporaryFile}),
+			[]string{"--foo", "bar", "-var-file=required.tfvars", fmt.Sprintf("-var-file=%s", temporaryFile)},
+		},
+		// apply providing a folder, var files should stay included
+		{
+			mockCmdOptions(t, workingDir, []string{"apply", workingDir}),
+			mockExtraArgs([]string{"--foo", "-var-file=test.tfvars", "-var='key=value'"}, []string{"plan", "apply"}, []string{"required.tfvars"}, []string{temporaryFile}),
+			[]string{"--foo", "-var-file=test.tfvars", "-var='key=value'", "-var-file=required.tfvars", fmt.Sprintf("-var-file=%s", temporaryFile)},
+		},
+		// apply providing a file, no var files included
+		{
+			mockCmdOptions(t, workingDir, []string{"apply", temporaryFile}),
+			mockExtraArgs([]string{"--foo", "-var-file=test.tfvars", "bar", "-var='key=value'", "foo"}, []string{"plan", "apply"}, []string{"required.tfvars"}, []string{temporaryFile}),
+			[]string{"--foo", "bar", "foo"},
+		},
+
+		// apply providing no params, var files should stay included
+		{
+			mockCmdOptions(t, workingDir, []string{"apply"}),
+			mockExtraArgs([]string{"--foo", "-var-file=test.tfvars", "bar", "-var='key=value'", "foo"}, []string{"plan", "apply"}, []string{"required.tfvars"}, []string{temporaryFile}),
+			[]string{"--foo", "-var-file=test.tfvars", "bar", "-var='key=value'", "foo", "-var-file=required.tfvars", fmt.Sprintf("-var-file=%s", temporaryFile)},
+		},
+		// apply with some parameters, providing a file => no var files included
+		{
+			mockCmdOptions(t, workingDir, []string{"apply", "-no-color", "-foo", temporaryFile}),
+			mockExtraArgs([]string{"--foo", "-var-file=test.tfvars", "bar", "-var='key=value'", "foo"}, []string{"plan", "apply"}, []string{"required.tfvars"}, []string{temporaryFile}),
+			[]string{"--foo", "bar", "foo"},
+		},
+
+		// Command not included in commands list
+		{
+			mockCmdOptions(t, workingDir, []string{"apply"}),
+			mockExtraArgs([]string{"--foo", "bar"}, []string{"plan", "destroy"}, []string{"required.tfvars"}, []string{"optional.tfvars"}),
+			[]string{},
+		},
+	}
+	for _, testCase := range testCases {
+		config := config.TerragruntConfig{
+			Terraform: &config.TerraformConfig{ExtraArgs: []config.TerraformExtraArguments{testCase.extraArgs}},
+		}
+
+		out := filterTerraformExtraArgs(testCase.options, &config)
+
+		assert.Equal(t, testCase.expectedArgs, out)
+	}
+
+}
+
+func createTempFile(t *testing.T) string {
+	tmpFile, err := ioutil.TempFile("", "")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %s\n", err.Error())
+	}
+
+	return filepath.ToSlash(tmpFile.Name())
+}
+
+func mockCmdOptions(t *testing.T, workingDir string, terraformCliArgs []string) *options.TerragruntOptions {
+	o := mockOptions(t, util.JoinPath(workingDir, config.DefaultTerragruntConfigPath), workingDir, terraformCliArgs, true, "", false)
+	return o
+}
+
+func mockExtraArgs(arguments, commands, requiredVarFiles, optionalVarFiles []string) config.TerraformExtraArguments {
+	a := config.TerraformExtraArguments{
+		Name:             "test",
+		Arguments:        arguments,
+		Commands:         commands,
+		RequiredVarFiles: requiredVarFiles,
+		OptionalVarFiles: optionalVarFiles,
+	}
+
+	return a
 }

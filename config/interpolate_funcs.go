@@ -2,14 +2,15 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/gruntwork-io/terragrunt/errors"
 	"github.com/gruntwork-io/terragrunt/util"
 	"github.com/hashicorp/hil/ast"
-	"os"
-	"path/filepath"
-	"strings"
 )
 
 func (ti *TerragruntInterpolation) Funcs() map[string]ast.Function {

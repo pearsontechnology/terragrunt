@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/gruntwork-io/terragrunt/shell"
+
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sts"
@@ -59,6 +61,13 @@ var TERRAFORM_COMMANDS_NEED_INPUT = []string{
 	"refresh",
 }
 
+// List of terraform commands that accept -parallelism=
+var TERRAFORM_COMMANDS_NEED_PARALLELISM = []string{
+	"apply",
+	"plan",
+	"destroy",
+}
+
 type EnvVar struct {
 	Name         string
 	DefaultValue string
@@ -95,6 +104,8 @@ func (ti *TerragruntInterpolation) executeTerragruntHelperFunction(functionName 
 		return ti.pathRelativeFromInclude()
 	case "get_env":
 		return ti.getEnvironmentVariable(parameters)
+	case "run_cmd":
+		return ti.runCommand(parameters)
 	case "get_tfvars_dir":
 		return ti.getTfVarsDir()
 	case "get_parent_tfvars_dir":
@@ -111,7 +122,8 @@ func (ti *TerragruntInterpolation) executeTerragruntHelperFunction(functionName 
 		return TERRAFORM_COMMANDS_NEED_LOCKING, nil
 	case "get_terraform_commands_that_need_input":
 		return TERRAFORM_COMMANDS_NEED_INPUT, nil
-
+	case "get_terraform_commands_that_need_parallelism":
+		return TERRAFORM_COMMANDS_NEED_PARALLELISM, nil
 	default:
 		return "", errors.WithStackTrace(UnknownHelperFunction(functionName))
 	}
@@ -247,6 +259,26 @@ func parseGetEnvParameters(parameters string) (EnvVar, error) {
 	return envVariable, nil
 }
 
+// runCommand is a helper function that runs a command and returns the stdout as the interporation
+// result
+func (ti *TerragruntInterpolation) runCommand(parameters string) (string, error) {
+	args := parseParamList(parameters)
+
+	if len(args) == 0 {
+		return "", errors.WithStackTrace(EmptyStringNotAllowed("parameter to the run_cmd function"))
+	}
+
+	currentPath := filepath.Dir(ti.Options.TerragruntConfigPath)
+
+	cmdOutput, err := shell.RunShellCommandWithOutput(ti.Options, currentPath, args[0], args[1:]...)
+	if err != nil {
+		return "", errors.WithStackTrace(err)
+	}
+
+	ti.Options.Logger.Printf("run_cmd output: [%s]", cmdOutput.Stdout)
+	return cmdOutput.Stdout, nil
+}
+
 func (ti *TerragruntInterpolation) getEnvironmentVariable(parameters string) (string, error) {
 	parameterMap, err := parseGetEnvParameters(parameters)
 
@@ -317,6 +349,7 @@ func (ti *TerragruntInterpolation) findInParentFolders(parameters string) (strin
 
 var oneQuotedParamRegex = regexp.MustCompile(`^"([^"]*?)"$`)
 var twoQuotedParamsRegex = regexp.MustCompile(`^"([^"]*?)"\s*,\s*"([^"]*?)"$`)
+var listQuotedParamRegex = regexp.MustCompile(`^"([^"]*?)"\s*,\s*(.*)$`)
 
 // Parse two optional parameters, wrapped in quotes, passed to a function, and return the parameter values and how many
 // of the parameters were actually set. For example, if you have a function foo(bar, baz), where bar and baz are
@@ -343,6 +376,44 @@ func parseOptionalQuotedParam(parameters string) (string, string, int, error) {
 	}
 
 	return "", "", 0, errors.WithStackTrace(InvalidStringParams(parameters))
+}
+
+// parseParamList parses a string of comma separated parameters wrapped in quote and
+// return them as a list of strings. For example:
+// foo() -> return []string{""}, nil
+// foo("a") -> return []string{"foo"}, nil
+// foo("a", "b", "c", "d") -> return []string{"a", "b", "c", "d"}, nil
+func parseParamList(parameters string) []string {
+	trimmedParameters := strings.TrimSpace(parameters)
+	if trimmedParameters == "" {
+		return []string{}
+	}
+
+	matches := oneQuotedParamRegex.FindStringSubmatch(trimmedParameters)
+	if len(matches) > 0 {
+		return matches[1:]
+	}
+
+	matches = listQuotedParamRegex.FindStringSubmatch(trimmedParameters)
+	if len(matches) != 3 {
+		return []string{}
+	}
+	var trimmedArgs []string
+	trimmedArgs = append(trimmedArgs, matches[1])
+
+	args := matches[2]
+	args = strings.Replace(args, `"`, "", -1)
+
+	parsedArgs := strings.Split(args, ",")
+
+	for _, arg := range parsedArgs {
+		trimmedArg := strings.TrimSpace(arg)
+		if trimmedArg != "" {
+			trimmedArgs = append(trimmedArgs, trimmedArg)
+		}
+	}
+
+	return trimmedArgs
 }
 
 // Return the relative path between the included Terragrunt configuration file and the current Terragrunt configuration

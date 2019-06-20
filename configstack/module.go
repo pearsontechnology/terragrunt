@@ -2,15 +2,18 @@ package configstack
 
 import (
 	"fmt"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+
 	"github.com/gruntwork-io/terragrunt/config"
 	"github.com/gruntwork-io/terragrunt/errors"
 	"github.com/gruntwork-io/terragrunt/options"
 	"github.com/gruntwork-io/terragrunt/shell"
 	"github.com/gruntwork-io/terragrunt/util"
 	"github.com/hashicorp/go-getter"
-	"path/filepath"
-	"regexp"
-	"strings"
+	zglob "github.com/mattn/go-zglob"
 )
 
 const maxLevelsOfRecursion = 20
@@ -23,6 +26,7 @@ type TerraformModule struct {
 	Config               config.TerragruntConfig
 	TerragruntOptions    *options.TerragruntOptions
 	AssumeAlreadyApplied bool
+	FlagExcluded         bool
 }
 
 // Render this module as a human-readable string
@@ -31,7 +35,7 @@ func (module *TerraformModule) String() string {
 	for _, dependency := range module.Dependencies {
 		dependencies = append(dependencies, dependency.Path)
 	}
-	return fmt.Sprintf("Module %s (dependencies: [%s])", module.Path, strings.Join(dependencies, ", "))
+	return fmt.Sprintf("Module %s (excluded: %v, dependencies: [%s])", module.Path, module.FlagExcluded, strings.Join(dependencies, ", "))
 }
 
 // Go through each of the given Terragrunt configuration files and resolve the module that configuration file represents
@@ -52,7 +56,153 @@ func ResolveTerraformModules(terragruntConfigPaths []string, terragruntOptions *
 		return []*TerraformModule{}, err
 	}
 
-	return crosslinkDependencies(mergeMaps(modules, externalDependencies), canonicalTerragruntConfigPaths)
+	crossLinkedModules, err := crosslinkDependencies(mergeMaps(modules, externalDependencies), canonicalTerragruntConfigPaths)
+	if err != nil {
+		return []*TerraformModule{}, err
+	}
+
+	includedModules, err := flagIncludedDirs(crossLinkedModules, terragruntOptions)
+	if err != nil {
+		return []*TerraformModule{}, err
+	}
+
+	finalModules, err := flagExcludedDirs(includedModules, terragruntOptions)
+	if err != nil {
+		return []*TerraformModule{}, err
+	}
+
+	return finalModules, nil
+}
+
+//flagExcludedDirs iterates over a module slice and flags all entries as excluded, which should be ignored via the terragrunt-exclude-dir CLI flag.
+func flagExcludedDirs(modules []*TerraformModule, terragruntOptions *options.TerragruntOptions) ([]*TerraformModule, error) {
+
+	// If no ExcludeDirs is specified return the modules list instantly
+	if len(terragruntOptions.ExcludeDirs) == 0 {
+		return modules, nil
+	}
+
+	canonicalWorkingDir, err := util.CanonicalPath("", terragruntOptions.WorkingDir)
+	if err != nil {
+		return nil, err
+	}
+
+	excludeGlobMatches := []string{}
+
+	// If possible, expand the glob to get all excluded filepaths
+	for _, dir := range terragruntOptions.ExcludeDirs {
+
+		absoluteDir := ""
+
+		// Ensure excludedDirs are absolute
+		if filepath.IsAbs(dir) {
+			absoluteDir = dir
+		} else {
+			absoluteDir = filepath.Join(canonicalWorkingDir, dir)
+		}
+
+		matches, err := zglob.Glob(absoluteDir)
+
+		// Skip globs that can not be expanded
+		if err == nil {
+			excludeGlobMatches = append(excludeGlobMatches, matches...)
+		}
+	}
+
+	// Make sure all paths are canonical
+	canonicalExcludeDirs := []string{}
+	for _, module := range excludeGlobMatches {
+		canonicalPath, err := util.CanonicalPath(module, terragruntOptions.WorkingDir)
+		if err != nil {
+			return nil, err
+		}
+		canonicalExcludeDirs = append(canonicalExcludeDirs, canonicalPath)
+	}
+
+	for _, module := range modules {
+		if findModuleinPath(module, canonicalExcludeDirs) {
+			// Mark module itself as excluded
+			module.FlagExcluded = true
+		}
+
+		// Mark all affected dependencies as excluded
+		for _, dependency := range module.Dependencies {
+			if findModuleinPath(dependency, canonicalExcludeDirs) {
+				dependency.FlagExcluded = true
+			}
+		}
+	}
+
+	return modules, nil
+}
+
+//flagIncludedDirs iterates over a module slice and flags all entries not in the list specified via the terragrunt-include-dir CLI flag  as excluded.
+func flagIncludedDirs(modules []*TerraformModule, terragruntOptions *options.TerragruntOptions) ([]*TerraformModule, error) {
+
+	// If no IncludeDirs is specified return the modules list instantly
+	if len(terragruntOptions.IncludeDirs) == 0 {
+		return modules, nil
+	}
+
+	canonicalWorkingDir, err := util.CanonicalPath("", terragruntOptions.WorkingDir)
+	if err != nil {
+		return nil, err
+	}
+
+	includeGlobMatches := []string{}
+
+	// If possible, expand the glob to get all included filepaths
+	for _, dir := range terragruntOptions.IncludeDirs {
+
+		absoluteDir := dir
+
+		// Ensure includedDirs are absolute
+		if !filepath.IsAbs(dir) {
+			absoluteDir = filepath.Join(canonicalWorkingDir, dir)
+		}
+
+		matches, err := zglob.Glob(absoluteDir)
+
+		// Skip globs that can not be expanded
+		if err == nil {
+			includeGlobMatches = append(includeGlobMatches, matches...)
+		}
+	}
+
+	// Make sure all paths are canonical
+	canonicalIncludeDirs := []string{}
+	for _, module := range includeGlobMatches {
+		canonicalPath, err := util.CanonicalPath(module, terragruntOptions.WorkingDir)
+		if err != nil {
+			return nil, err
+		}
+		canonicalIncludeDirs = append(canonicalIncludeDirs, canonicalPath)
+	}
+
+	for _, module := range modules {
+		if findModuleinPath(module, canonicalIncludeDirs) {
+			// Mark module itself as included
+			module.FlagExcluded = false
+			// Mark all affected dependencies as included
+			for _, dependency := range module.Dependencies {
+				dependency.FlagExcluded = false
+			}
+		} else {
+			module.FlagExcluded = true
+		}
+	}
+
+	return modules, nil
+}
+
+// Returns true if a module is located under one of the target directories
+func findModuleinPath(module *TerraformModule, targetDirs []string) bool {
+	for _, targetDir := range targetDirs {
+		if strings.Contains(module.Path, targetDir) {
+			return true
+		}
+	}
+	return false
 }
 
 // Go through each of the given Terragrunt configuration files and resolve the module that configuration file represents
@@ -202,7 +352,9 @@ func resolveExternalDependenciesForModules(moduleMap map[string]*TerraformModule
 		return allExternalDependencies, errors.WithStackTrace(InfiniteRecursion{RecursionLevel: maxLevelsOfRecursion, Modules: modulesToSkip})
 	}
 
-	for _, module := range moduleMap {
+	sortedKeys := getSortedKeys(moduleMap)
+	for _, key := range sortedKeys {
+		module := moduleMap[key]
 		externalDependencies, err := resolveExternalDependenciesForModule(module, modulesToSkip, terragruntOptions)
 		if err != nil {
 			return externalDependencies, err
@@ -213,9 +365,12 @@ func resolveExternalDependenciesForModules(moduleMap map[string]*TerraformModule
 				continue
 			}
 
-			shouldApply, err := confirmShouldApplyExternalDependency(module, externalDependency, terragruntOptions)
-			if err != nil {
-				return externalDependencies, err
+			shouldApply := false
+			if !terragruntOptions.IgnoreExternalDependencies {
+				shouldApply, err = confirmShouldApplyExternalDependency(module, externalDependency, terragruntOptions)
+				if err != nil {
+					return externalDependencies, err
+				}
 			}
 
 			externalDependency.AssumeAlreadyApplied = !shouldApply
@@ -289,7 +444,9 @@ func mergeMaps(modules map[string]*TerraformModule, externalDependencies map[str
 func crosslinkDependencies(moduleMap map[string]*TerraformModule, canonicalTerragruntConfigPaths []string) ([]*TerraformModule, error) {
 	modules := []*TerraformModule{}
 
-	for _, module := range moduleMap {
+	keys := getSortedKeys(moduleMap)
+	for _, key := range keys {
+		module := moduleMap[key]
 		dependencies, err := getDependenciesForModule(module, moduleMap, canonicalTerragruntConfigPaths)
 		if err != nil {
 			return modules, err
@@ -329,6 +486,19 @@ func getDependenciesForModule(module *TerraformModule, moduleMap map[string]*Ter
 	}
 
 	return dependencies, nil
+}
+
+// Return the keys for the given map in sorted order. This is used to ensure we always iterate over maps of modules
+// in a consistent order (Go does not guarantee iteration order for maps, and usually makes it random)
+func getSortedKeys(modules map[string]*TerraformModule) []string {
+	keys := []string{}
+	for key, _ := range modules {
+		keys = append(keys, key)
+	}
+
+	sort.Strings(keys)
+
+	return keys
 }
 
 // Custom error types

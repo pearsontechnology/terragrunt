@@ -82,7 +82,19 @@ func parseTerragruntOptionsFromArgs(args []string, writer, errWriter io.Writer) 
 
 	ignoreDependencyErrors := parseBooleanArg(args, OPT_TERRAGRUNT_IGNORE_DEPENDENCY_ERRORS, false)
 
+	ignoreExternalDependencies := parseBooleanArg(args, OPT_TERRAGRUNT_IGNORE_EXTERNAL_DEPENDENCIES, false)
+
 	iamRole, err := parseStringArg(args, OPT_TERRAGRUNT_IAM_ROLE, os.Getenv("TERRAGRUNT_IAM_ROLE"))
+	if err != nil {
+		return nil, err
+	}
+
+	excludeDirs, err := parseMultiStringArg(args, OPT_TERRAGRUNT_EXCLUDE_DIR, []string{})
+	if err != nil {
+		return nil, err
+	}
+
+	includeDirs, err := parseMultiStringArg(args, OPT_TERRAGRUNT_INCLUDE_DIR, []string{})
 	if err != nil {
 		return nil, err
 	}
@@ -94,6 +106,7 @@ func parseTerragruntOptionsFromArgs(args []string, writer, errWriter io.Writer) 
 
 	opts.TerraformPath = filepath.ToSlash(terraformPath)
 	opts.AutoInit = !parseBooleanArg(args, OPT_TERRAGRUNT_NO_AUTO_INIT, os.Getenv("TERRAGRUNT_AUTO_INIT") == "false")
+	opts.AutoRetry = !parseBooleanArg(args, OPT_TERRAGRUNT_NO_AUTO_RETRY, os.Getenv("TERRAGRUNT_AUTO_RETRY") == "false")
 	opts.NonInteractive = parseBooleanArg(args, OPT_NON_INTERACTIVE, os.Getenv("TF_INPUT") == "false" || os.Getenv("TF_INPUT") == "0")
 	opts.TerraformCliArgs = filterTerragruntArgs(args)
 	opts.TerraformCommand = util.FirstArg(opts.TerraformCliArgs)
@@ -104,10 +117,13 @@ func parseTerragruntOptionsFromArgs(args []string, writer, errWriter io.Writer) 
 	opts.Source = terraformSource
 	opts.SourceUpdate = sourceUpdate
 	opts.IgnoreDependencyErrors = ignoreDependencyErrors
+	opts.IgnoreExternalDependencies = ignoreExternalDependencies
 	opts.Writer = writer
 	opts.ErrWriter = errWriter
 	opts.Env = parseEnvironmentVariables(os.Environ())
 	opts.IamRole = iamRole
+	opts.ExcludeDirs = excludeDirs
+	opts.IncludeDirs = includeDirs
 
 	return opts, nil
 }
@@ -119,20 +135,38 @@ func filterTerraformExtraArgs(terragruntOptions *options.TerragruntOptions, terr
 	for _, arg := range terragruntConfig.Terraform.ExtraArgs {
 		for _, arg_cmd := range arg.Commands {
 			if cmd == arg_cmd {
-				out = append(out, arg.Arguments...)
+				lastArg := util.LastArg(terragruntOptions.TerraformCliArgs)
+				skipVars := cmd == "apply" && util.IsFile(lastArg)
 
-				// If RequiredVarFiles is specified, add -var-file=<file> for each specified files
-				for _, file := range util.RemoveDuplicatesFromListKeepLast(arg.RequiredVarFiles) {
-					out = append(out, fmt.Sprintf("-var-file=%s", file))
+				// The following is a fix for GH-493.
+				// If the first argument is "apply" and the second argument is a file (plan),
+				// we don't add any -var-file to the command.
+				if skipVars {
+					// If we have to skip vars, we need to iterate over all elements of array...
+					for _, a := range arg.Arguments {
+						if !strings.HasPrefix(a, "-var") {
+							out = append(out, a)
+						}
+					}
+				} else {
+					// ... Otherwise, let's add all the arguments
+					out = append(out, arg.Arguments...)
 				}
 
-				// If OptionalVarFiles is specified, check for each file if it exists and if so, add -var-file=<file>
-				// It is possible that many files resolve to the same path, so we remove duplicates.
-				for _, file := range util.RemoveDuplicatesFromListKeepLast(arg.OptionalVarFiles) {
-					if util.FileExists(file) {
+				if !skipVars {
+					// If RequiredVarFiles is specified, add -var-file=<file> for each specified files
+					for _, file := range util.RemoveDuplicatesFromListKeepLast(arg.RequiredVarFiles) {
 						out = append(out, fmt.Sprintf("-var-file=%s", file))
-					} else {
-						terragruntOptions.Logger.Printf("Skipping var-file %s as it does not exist", file)
+					}
+
+					// If OptionalVarFiles is specified, check for each file if it exists and if so, add -var-file=<file>
+					// It is possible that many files resolve to the same path, so we remove duplicates.
+					for _, file := range util.RemoveDuplicatesFromListKeepLast(arg.OptionalVarFiles) {
+						if util.FileExists(file) {
+							out = append(out, fmt.Sprintf("-var-file=%s", file))
+						} else {
+							terragruntOptions.Logger.Printf("Skipping var-file %s as it does not exist", file)
+						}
 					}
 				}
 			}
@@ -227,6 +261,27 @@ func parseStringArg(args []string, argName string, defaultValue string) (string,
 	// read .tgproject value
 
 	return defaultValue, nil
+}
+
+// Find multiple string arguments of the same type (e.g. --foo "VALUE_A" --foo "VALUE_B") of the given name in the given list of arguments. If there are any present,
+// return a list of all values. If there are any present, but one of them has no value, return an error. If there aren't any present, return defaultValue.
+func parseMultiStringArg(args []string, argName string, defaultValue []string) ([]string, error) {
+	stringArgs := []string{}
+
+	for i, arg := range args {
+		if arg == fmt.Sprintf("--%s", argName) {
+			if (i + 1) < len(args) {
+				stringArgs = append(stringArgs, args[i+1])
+			} else {
+				return nil, errors.WithStackTrace(ArgMissingValue(argName))
+			}
+		}
+	}
+	if len(stringArgs) == 0 {
+		return defaultValue, nil
+	}
+
+	return stringArgs, nil
 }
 
 // Custom error types

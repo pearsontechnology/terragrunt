@@ -1,9 +1,9 @@
 package config
 
 import (
-	"testing"
 	"github.com/gruntwork-io/terragrunt/options"
 	"github.com/gruntwork-io/terragrunt/util"
+	"testing"
 )
 
 func TestResolveTerragruntConfig(t *testing.T) {
@@ -32,8 +32,8 @@ func TestResolveTerragruntConfig(t *testing.T) {
 	ti := TerragruntInterpolation{
 		Options: &opts,
 	}
-	_,err = ti.ResolveTerragruntConfig(str)
-	if err != nil{
+	_, err = ti.ResolveTerragruntConfig(str)
+	if err != nil {
 		t.Error(err)
 	}
 }

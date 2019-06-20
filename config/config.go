@@ -21,8 +21,10 @@ type TerragruntConfig struct {
 	Terraform      *TerraformConfig
 	RemoteState    *remote.RemoteState
 	Dependencies   *ModuleDependencies
-	Variables    map[string]interface{}
+	Variables      map[string]interface{}
 	PreventDestroy bool
+	Skip           bool
+	IamRole        string
 }
 
 // terragruntConfigFile represents the configuration supported in a Terragrunt configuration file (i.e.
@@ -34,6 +36,8 @@ type terragruntConfigFile struct {
 	RemoteState    *remote.RemoteState `hcl:"remote_state,omitempty"`
 	Dependencies   *ModuleDependencies `hcl:"dependencies,omitempty"`
 	PreventDestroy bool                `hcl:"prevent_destroy,omitempty"`
+	Skip           bool                `hcl:"skip,omitempty"`
+	IamRole        string              `hcl:"iam_role"`
 }
 
 // Older versions of Terraform did not support locking, so Terragrunt offered locking as a feature. As of version 0.9.0,
@@ -366,6 +370,12 @@ func mergeConfigWithIncludedConfig(config *TerragruntConfig, includedConfig *Ter
 	if config.RemoteState != nil {
 		includedConfig.RemoteState = config.RemoteState
 	}
+	if config.PreventDestroy {
+		includedConfig.PreventDestroy = config.PreventDestroy
+	}
+
+	// Skip has to be set specifically in each file that should be skipped
+	includedConfig.Skip = config.Skip
 
 	if config.Terraform != nil {
 		if includedConfig.Terraform == nil {
@@ -383,6 +393,10 @@ func mergeConfigWithIncludedConfig(config *TerragruntConfig, includedConfig *Ter
 
 	if config.Dependencies != nil {
 		includedConfig.Dependencies = config.Dependencies
+	}
+
+	if config.IamRole != "" {
+		includedConfig.IamRole = config.IamRole
 	}
 
 	// merge variables here
@@ -514,6 +528,8 @@ func convertToTerragruntConfig(terragruntConfigFromFile *terragruntConfigFile, t
 	terragruntConfig.Terraform = terragruntConfigFromFile.Terraform
 	terragruntConfig.Dependencies = terragruntConfigFromFile.Dependencies
 	terragruntConfig.PreventDestroy = terragruntConfigFromFile.PreventDestroy
+	terragruntConfig.Skip = terragruntConfigFromFile.Skip
+	terragruntConfig.IamRole = terragruntConfigFromFile.IamRole
 
 	return terragruntConfig, nil
 }

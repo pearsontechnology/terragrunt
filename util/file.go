@@ -94,6 +94,12 @@ func IsDir(path string) bool {
 	return err == nil && fileInfo.IsDir()
 }
 
+// Return true if the path points to a file
+func IsFile(path string) bool {
+	fileInfo, err := os.Stat(path)
+	return err == nil && !fileInfo.IsDir()
+}
+
 // Return the relative path you would have to take to get from basePath to path
 func GetPathRelativeTo(path string, basePath string) (string, error) {
 	if path == "" {
@@ -145,7 +151,7 @@ func CopyFolderContents(source string, destination string) error {
 
 		if PathContainsHiddenFileOrFolder(file.Name()) {
 			continue
-		} else if file.IsDir() {
+		} else if IsDir(src) {
 			if err := os.MkdirAll(dest, file.Mode()); err != nil {
 				return errors.WithStackTrace(err)
 			}
