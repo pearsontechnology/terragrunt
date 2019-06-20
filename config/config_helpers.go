@@ -61,6 +61,13 @@ var TERRAFORM_COMMANDS_NEED_INPUT = []string{
 	"refresh",
 }
 
+// List of terraform commands that accept -parallelism=
+var TERRAFORM_COMMANDS_NEED_PARALLELISM = []string{
+	"apply",
+	"plan",
+	"destroy",
+}
+
 type EnvVar struct {
 	Name         string
 	DefaultValue string
@@ -115,7 +122,8 @@ func (ti *TerragruntInterpolation) executeTerragruntHelperFunction(functionName 
 		return TERRAFORM_COMMANDS_NEED_LOCKING, nil
 	case "get_terraform_commands_that_need_input":
 		return TERRAFORM_COMMANDS_NEED_INPUT, nil
-
+	case "get_terraform_commands_that_need_parallelism":
+		return TERRAFORM_COMMANDS_NEED_PARALLELISM, nil
 	default:
 		return "", errors.WithStackTrace(UnknownHelperFunction(functionName))
 	}
